@@ -75,11 +75,12 @@ else:
 @celery_app.task(bind=True, name='scrape_keyword')
 def scrape_keyword_task(self, keyword: str, priority: str = 'normal'):
     """
-    Tarea de Celery para scrapear una keyword
+    Tarea de Celery para scrapear una keyword usando AsyncScraper real
     """
     try:
         from main_async import AsyncScraper
         import asyncio
+        import time
 
         # Configurar logging para la tarea
         import logging
@@ -88,16 +89,59 @@ def scrape_keyword_task(self, keyword: str, priority: str = 'normal'):
 
         log.info(f"🚀 Iniciando scraping de keyword: {keyword} (priority: {priority})")
 
-        # Aquí iría la lógica de scraping usando AsyncScraper
-        # Por ahora, devolver un resultado simulado
+        start_time = time.time()
+
+        # Crear scraper asíncrono
+        async def run_scraping():
+            async with AsyncScraper() as scraper:
+                # Ejecutar scraping real usando AsyncScraper
+                posts = await scraper.scrape_keyword(keyword)
+
+                # Convertir posts a formato serializable
+                posts_data = []
+                for post in posts:
+                    if hasattr(post, 'to_dict'):
+                        posts_data.append(post.to_dict())
+                    else:
+                        posts_data.append({
+                            'id': post.id,
+                            'source': post.source,
+                            'url': post.url,
+                            'title': post.title,
+                            'body': post.body,
+                            'created_at': post.created_at,
+                            'keyword': post.keyword,
+                            'tag': post.tag,
+                            'published_at': post.published_at,
+                            'relevance_score': post.relevance_score
+                        })
+
+                return posts_data
+
+        # Ejecutar scraping en el event loop
+        try:
+            posts_data = asyncio.run(run_scraping())
+        except RuntimeError:
+            # Si ya hay un event loop corriendo (en algunos entornos)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                posts_data = loop.run_until_complete(run_scraping())
+            finally:
+                loop.close()
+
+        duration = time.time() - start_time
+
         result = {
             'keyword': keyword,
             'status': 'completed',
-            'posts_found': 42,
-            'duration': 15.5
+            'posts_found': len(posts_data),
+            'posts_data': posts_data,
+            'duration': round(duration, 2),
+            'priority': priority
         }
 
-        log.info(f"✅ Scraping completado para {keyword}: {result}")
+        log.info(f"✅ Scraping completado para {keyword}: {len(posts_data)} posts en {duration:.2f}s")
         return result
 
     except Exception as e:
@@ -256,5 +300,4 @@ def queue_export(export_config: dict):
 
 if __name__ == '__main__':
     # Para testing local
-    celery_app.start()</content>
-<parameter name="filePath">d:\Projects\aqxion-scraper-mvp\celery_app.py
+    celery_app.start()

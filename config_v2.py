@@ -61,9 +61,9 @@ class DatabaseSettings(BaseSettings):
 
     path: Path = Field(default=Path("scraping.db"), description="Path to SQLite database")
     enable_wal: bool = Field(default=True, description="Enable WAL mode for better concurrency")
-    synchronous_mode: str = Field(default="NORMAL", regex="^(FULL|NORMAL|OFF)$", description="SQLite synchronous mode")
+    synchronous_mode: str = Field(default="NORMAL", pattern=r"^(FULL|NORMAL|OFF)$", description="SQLite synchronous mode")
     cache_size: int = Field(default=-64000, description="SQLite cache size in KB (negative for KB)")
-    journal_mode: str = Field(default="WAL", regex="^(DELETE|TRUNCATE|PERSIST|MEMORY|WAL|OFF)$")
+    journal_mode: str = Field(default="WAL", pattern=r"^(DELETE|TRUNCATE|PERSIST|MEMORY|WAL|OFF)$", description="SQLite journal mode")
 
     # Connection pool settings
     max_connections: int = Field(default=10, ge=1, le=100, description="Maximum database connections")
@@ -140,7 +140,7 @@ class MonitoringSettings(BaseSettings):
     """Monitoring and observability settings"""
 
     # Logging
-    log_level: str = Field(default="INFO", regex="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+    log_level: str = Field(default="INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$", description="Logging level")
     log_format: str = Field(
         default="%(asctime)s %(name)s %(levelname)s %(message)s",
         description="Log format string"
@@ -201,8 +201,10 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
-    @validator("debug", pre=True)
+    @field_validator("debug", mode="before")
+    @classmethod
     def validate_debug(cls, v):
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes", "on")

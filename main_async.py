@@ -9,6 +9,7 @@ import datetime as dt
 import re
 import logging
 import os
+import random
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set, Any
 from urllib.parse import urljoin, urlparse
@@ -72,16 +73,108 @@ class ScrapedPost:
         return asdict(self)
 
 
-class AsyncRateLimiter:
-    """Rate limiter asÃ­ncrono inteligente con backoff"""
+class TokenBucketRateLimiter:
+    """Rate limiter avanzado con token bucket y jitter"""
 
     def __init__(self):
+        self.domain_tokens = {}  # tokens disponibles por dominio
+        self.domain_last_refill = {}  # último refill por dominio
+        self.domain_burst_capacity = {}  # capacidad máxima por dominio
+        self.domain_refill_rate = {}  # tokens por segundo por dominio
+
+        # Configuraciones por defecto
+        self.default_burst_capacity = 10  # máximo 10 requests en burst
+        self.default_refill_rate = 2.0  # 2 tokens por segundo
+        self.jitter_range = (0.1, 0.5)  # jitter entre 0.1s y 0.5s
+
+        # Overrides para dominios sensibles
+        self.sensitive_domains = {
+            'google.com': {'burst': 3, 'rate': 0.5},
+            'bing.com': {'burst': 3, 'rate': 0.5},
+            'duckduckgo.com': {'burst': 5, 'rate': 1.0},
+            'facebook.com': {'burst': 2, 'rate': 0.3},
+            'twitter.com': {'burst': 3, 'rate': 0.5},
+            'linkedin.com': {'burst': 2, 'rate': 0.3},
+        }
+
+    def _get_domain_config(self, domain: str) -> Dict[str, float]:
+        """Obtener configuración específica para un dominio"""
+        if domain in self.sensitive_domains:
+            config = self.sensitive_domains[domain]
+            return {
+                'burst': config['burst'],
+                'rate': config['rate']
+            }
+        return {
+            'burst': self.default_burst_capacity,
+            'rate': self.default_refill_rate
+        }
+
+    def _refill_tokens(self, domain: str) -> None:
+        """Refill tokens para un dominio"""
+        now = asyncio.get_event_loop().time()
+        config = self._get_domain_config(domain)
+
+        if domain not in self.domain_last_refill:
+            # Primera vez - inicializar con capacidad máxima
+            self.domain_tokens[domain] = config['burst']
+            self.domain_burst_capacity[domain] = config['burst']
+            self.domain_refill_rate[domain] = config['rate']
+            self.domain_last_refill[domain] = now
+            return
+
+        # Calcular tokens a agregar
+        time_passed = now - self.domain_last_refill[domain]
+        tokens_to_add = time_passed * config['rate']
+
+        if tokens_to_add > 0:
+            current_tokens = self.domain_tokens.get(domain, 0)
+            max_tokens = self.domain_burst_capacity.get(domain, config['burst'])
+
+            self.domain_tokens[domain] = min(current_tokens + tokens_to_add, max_tokens)
+            self.domain_last_refill[domain] = now
+
+    async def wait_if_needed(self, domain: str) -> None:
+        """Esperar si es necesario según token bucket con jitter"""
+        self._refill_tokens(domain)
+
+        config = self._get_domain_config(domain)
+        current_tokens = self.domain_tokens.get(domain, config['burst'])
+
+        if current_tokens >= 1:
+            # Hay tokens disponibles - consumir uno
+            self.domain_tokens[domain] = current_tokens - 1
+
+            # Aplicar jitter para evitar patrones predecibles
+            import random
+            jitter = random.uniform(*self.jitter_range)
+            await asyncio.sleep(jitter)
+            return
+
+        # No hay tokens - calcular tiempo de espera
+        time_to_next_token = 1.0 / config['rate']
+        wait_time = time_to_next_token + random.uniform(*self.jitter_range)
+
+        log.debug(f"Rate limiting: esperando {wait_time:.2f}s para {domain} (tokens: {current_tokens:.1f})")
+        await asyncio.sleep(wait_time)
+
+        # Después de esperar, consumir el token
+        self._refill_tokens(domain)
+        if self.domain_tokens.get(domain, 0) > 0:
+            self.domain_tokens[domain] -= 1
+
+
+class AsyncRateLimiter:
+    """Rate limiter asíncrono inteligente con backoff y token bucket"""
+
+    def __init__(self):
+        self.token_bucket = TokenBucketRateLimiter()
         self.domain_last_request = domain_last_request
         self.domain_error_count = domain_error_count
         self.domain_backoff_until = domain_backoff_until
 
     async def wait_if_needed(self, domain: str) -> None:
-        """Esperar si es necesario segÃºn rate limiting"""
+        """Esperar si es necesario según rate limiting inteligente"""
         now = asyncio.get_event_loop().time()
 
         # Verificar backoff activo
@@ -91,24 +184,8 @@ class AsyncRateLimiter:
             await asyncio.sleep(min(remaining, scraping_config.max_backoff_delay))
             return
 
-        # Rate limiting normal
-        if domain in self.domain_last_request:
-            time_since_last = now - self.domain_last_request[domain]
-            base_delay = scraping_config.domain_rate_limit
-
-            # Aplicar backoff adicional por errores
-            error_count = self.domain_error_count.get(domain, 0)
-            if error_count > 0:
-                backoff_delay = min(
-                    base_delay * (2 ** error_count),
-                    scraping_config.max_backoff_delay
-                )
-                base_delay = backoff_delay
-
-            if time_since_last < base_delay:
-                actual_delay = base_delay - time_since_last
-                log.debug(f"Rate limiting: esperando {actual_delay:.2f}s para {domain}")
-                await asyncio.sleep(actual_delay)
+        # Usar token bucket para rate limiting normal
+        await self.token_bucket.wait_if_needed(domain)
 
         self.domain_last_request[domain] = now
 
