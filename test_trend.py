@@ -10,7 +10,7 @@ SELECT DATE(created_at) d,
        SUM(CASE WHEN tag='objecion' THEN 1 ELSE 0 END) objeciones,
        COUNT(*) total
 FROM posts
-WHERE DATE(created_at) >= DATE('now','-6 day')
+WHERE DATE(created_at) >= DATE('now','utc','-6 day')
 GROUP BY d
 ORDER BY d
 '''

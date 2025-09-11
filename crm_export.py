@@ -100,7 +100,7 @@ class CRMExporter:
                     created_at,
                     published_at
                 FROM posts
-                WHERE DATE(created_at, 'utc') = DATE('now', 'utc')
+                WHERE DATE(created_at) = DATE('now','utc')
                 AND tag IN ('dolor', 'busqueda')
                 AND relevance_score >= 80
                 ORDER BY relevance_score DESC, created_at DESC

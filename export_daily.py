@@ -36,7 +36,7 @@ def export_daily_intentions():
                 tag,
                 published_at
             FROM posts
-            WHERE DATE(created_at, 'utc') = DATE('now', 'utc')
+            WHERE DATE(created_at) = DATE('now','utc')
             AND tag IN ('dolor', 'busqueda', 'objecion')
             ORDER BY created_at DESC
         """)
@@ -95,7 +95,7 @@ def export_daily_summary():
                     1
                 ) as percentage
             FROM posts
-            WHERE DATE(created_at, 'utc') = DATE('now', 'utc')
+            WHERE DATE(created_at) = DATE('now','utc')
             AND tag IN ('dolor', 'busqueda', 'objecion', 'ruido')
             GROUP BY keyword, tag
             ORDER BY keyword, count DESC

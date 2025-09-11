@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # Redis para colas y caché
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Worker principal de scraping
+  scraper-worker:
+    build: .
+    command: python celery_worker.py worker --queue scraping --concurrency 4
+    environment:
+      - CELERY_ENV=production
+      - QUEUE_CELERY_BROKER_URL=redis://redis:6379/0
+      - QUEUE_CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./scraping.db:/app/scraping.db
+    restart: unless-stopped
+
+  # Worker de alta prioridad (alertas)
+  high-priority-worker:
+    build: .
+    command: python celery_worker.py worker --queue high_priority --concurrency 2
+    environment:
+      - CELERY_ENV=production
+      - QUEUE_CELERY_BROKER_URL=redis://redis:6379/0
+      - QUEUE_CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./scraping.db:/app/scraping.db
+    restart: unless-stopped
+
+  # Worker de baja prioridad (exportaciones)
+  low-priority-worker:
+    build: .
+    command: python celery_worker.py worker --queue low_priority --concurrency 1
+    environment:
+      - CELERY_ENV=production
+      - QUEUE_CELERY_BROKER_URL=redis://redis:6379/0
+      - QUEUE_CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./scraping.db:/app/scraping.db
+    restart: unless-stopped
+
+  # Scheduler para tareas programadas
+  scheduler:
+    build: .
+    command: python celery_worker.py scheduler
+    environment:
+      - CELERY_ENV=production
+      - QUEUE_CELERY_BROKER_URL=redis://redis:6379/0
+      - QUEUE_CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./scraping.db:/app/scraping.db
+    restart: unless-stopped
+
+  # Monitor de tareas (Flower)
+  flower:
+    image: mher/flower:1.2.0
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=user:password
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Dashboard web
+  dashboard:
+    build: .
+    command: streamlit run dashboard_web.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - CELERY_ENV=production
+    volumes:
+      - .:/app
+      - ./scraping.db:/app/scraping.db
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+    driver: bridge

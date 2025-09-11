@@ -15,7 +15,7 @@ def kpi():
               SUM(CASE WHEN tag='ruido' THEN 1 ELSE 0 END) AS ruido,
               COUNT(DISTINCT id) AS total
             FROM posts
-            WHERE DATE(created_at)=DATE('now')
+            WHERE DATE(created_at)=DATE('now','utc')
         """)
         row = cur.fetchone()
     except sqlite3.Error as e:
@@ -50,7 +50,7 @@ def kpi():
         cur.execute("""
             SELECT COUNT(DISTINCT p.id) 
             FROM posts p
-            WHERE DATE(p.created_at)=DATE('now') 
+            WHERE DATE(p.created_at)=DATE('now','utc') 
             AND p.tag='dolor'
             AND (LENGTH(p.title) > 30 OR LENGTH(p.body) > 50)
             AND p.relevance_score > 80
@@ -79,7 +79,7 @@ def kpi():
             (SUM(CASE WHEN tag='dolor' AND relevance_score > 80 THEN 1 ELSE 0 END) + 
              SUM(CASE WHEN tag='busqueda' THEN 1 ELSE 0 END)) as leads_potenciales
         FROM posts 
-        WHERE DATE(created_at)=DATE('now')
+        WHERE DATE(created_at)=DATE('now','utc')
         GROUP BY keyword
         ORDER BY leads_potenciales DESC, total_posts DESC
         LIMIT 5
@@ -108,7 +108,7 @@ def kpi():
                     1
                 ) as intencion_pct
             FROM posts 
-            WHERE DATE(created_at)=DATE('now')
+            WHERE DATE(created_at)=DATE('now','utc')
             GROUP BY keyword
             ORDER BY intencion_pct DESC, total_posts DESC
             LIMIT 10
@@ -133,7 +133,7 @@ def kpi():
         cur.execute("""
             SELECT keyword, tag, COUNT(*) as c
             FROM posts
-            WHERE DATE(created_at)=DATE('now') AND tag != 'ruido'
+            WHERE DATE(created_at)=DATE('now','utc') AND tag != 'ruido'
             GROUP BY keyword, tag
             ORDER BY c DESC
             LIMIT 10

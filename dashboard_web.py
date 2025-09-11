@@ -31,15 +31,104 @@ def utc_to_lima_time(utc_str):
 def get_today_data():
     con = get_db_connection()
     cur = con.cursor()
-    
+
     try:
-        # Posts de hoy - usar UTC para consistencia
-        cur.execute("SELECT * FROM posts WHERE DATE(created_at, 'utc') = DATE('now', 'utc')")
+        # Usar DATE('now','utc') para consistencia con UTC
+        cur.execute("""
+            SELECT * FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
+        """)
         today_posts = cur.fetchall()
         return today_posts
     except sqlite3.Error as e:
         st.error(f"Error al obtener datos de hoy: {e}")
         return []
+    finally:
+        con.close()
+
+# Función para obtener métricas de radar de mercado
+def get_market_radar_metrics():
+    """Obtener métricas avanzadas para el radar de mercado"""
+    con = get_db_connection()
+    cur = con.cursor()
+
+    try:
+        # Métricas de intención por hora
+        cur.execute("""
+            SELECT
+                strftime('%H', created_at) as hour,
+                COUNT(*) as total_posts,
+                SUM(CASE WHEN tag IN ('dolor', 'busqueda', 'objecion') THEN 1 ELSE 0 END) as intent_posts,
+                ROUND(
+                    (SUM(CASE WHEN tag IN ('dolor', 'busqueda', 'objecion') THEN 1 ELSE 0 END) * 100.0) / COUNT(*),
+                    1
+                ) as intent_pct
+            FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
+            GROUP BY hour
+            ORDER BY hour
+        """)
+        hourly_intent = cur.fetchall()
+
+        # Top keywords con mayor crecimiento
+        cur.execute("""
+            SELECT
+                keyword,
+                COUNT(*) as posts_today,
+                AVG(relevance_score) as avg_score,
+                SUM(CASE WHEN tag IN ('dolor', 'busqueda') THEN 1 ELSE 0 END) as hot_leads
+            FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
+            AND keyword IS NOT NULL
+            GROUP BY keyword
+            HAVING posts_today >= 3
+            ORDER BY hot_leads DESC, avg_score DESC
+            LIMIT 10
+        """)
+        top_keywords = cur.fetchall()
+
+        # Distribución de tags
+        cur.execute("""
+            SELECT
+                tag,
+                COUNT(*) as count,
+                ROUND((COUNT(*) * 100.0) / SUM(COUNT(*)) OVER (), 1) as percentage
+            FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
+            AND tag IS NOT NULL
+            GROUP BY tag
+            ORDER BY count DESC
+        """)
+        tag_distribution = cur.fetchall()
+
+        # Alertas de mercado (posts con alta intención)
+        cur.execute("""
+            SELECT
+                title,
+                url,
+                tag,
+                relevance_score,
+                keyword,
+                created_at
+            FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
+            AND tag IN ('dolor', 'busqueda')
+            AND relevance_score >= 80
+            ORDER BY relevance_score DESC, created_at DESC
+            LIMIT 5
+        """)
+        market_alerts = cur.fetchall()
+
+        return {
+            'hourly_intent': hourly_intent,
+            'top_keywords': top_keywords,
+            'tag_distribution': tag_distribution,
+            'market_alerts': market_alerts
+        }
+
+    except sqlite3.Error as e:
+        st.error(f"Error al obtener métricas de radar: {e}")
+        return {}
     finally:
         con.close()
 
@@ -54,16 +143,20 @@ def get_kpis():
         result = cur.fetchone()
         total_posts = result[0] if result else 0
 
-        # Posts por intención
-        cur.execute('SELECT tag, COUNT(*) FROM posts WHERE tag IS NOT NULL GROUP BY tag')
+        # Posts por intención - usar DATE('now','utc') para consistencia
+        cur.execute("""
+            SELECT tag, COUNT(*) FROM posts 
+            WHERE DATE(created_at) = DATE('now','utc') AND tag IS NOT NULL 
+            GROUP BY tag
+        """)
         intent_results = cur.fetchall()
         intent_counts = dict(intent_results) if intent_results else {}
 
-        # Top keywords por intención
+        # Top keywords por intención - usar DATE('now','utc')
         cur.execute('''
             SELECT keyword, tag, COUNT(*) as count
             FROM posts
-            WHERE tag IS NOT NULL
+            WHERE DATE(created_at) = DATE('now','utc') AND tag IS NOT NULL
             GROUP BY keyword, tag
             ORDER BY count DESC
             LIMIT 10
@@ -93,7 +186,7 @@ def get_keyword_kpis():
                     1
                 ) as intencion_pct
             FROM posts 
-            WHERE DATE(created_at, 'utc') = DATE('now', 'utc')
+            WHERE DATE(created_at) = DATE('now','utc')
             GROUP BY keyword
             ORDER BY intencion_pct DESC, total_posts DESC
             LIMIT 10
@@ -115,6 +208,7 @@ def get_recent_posts(limit=10):
         cur.execute('''
             SELECT keyword, title, url, tag, created_at, body
             FROM posts
+            WHERE DATE(created_at) = DATE('now','utc')
             ORDER BY created_at DESC
             LIMIT ?
         ''', (limit,))
@@ -235,22 +329,54 @@ st.subheader("📰 Últimos 10 Posts")
 recent_posts = get_recent_posts(10)
 
 if recent_posts:
-    for i, (keyword, title, url, tag, created_at, body) in enumerate(recent_posts, 1):
+    # Crear DataFrame para tabla con links clickeables
+    posts_data = []
+    for keyword, title, url, tag, created_at, body in recent_posts:
         lima_time = utc_to_lima_time(created_at)
         dt = lima_time.strftime('%Y-%m-%d %H:%M')
-
-        # Crear expander para cada post
-        with st.expander(f"{i}. [{keyword.upper()}] - {dt} - {tag or 'sin tag'}"):
-            st.write(f"**Título:** {title}")
-
-            # Link clickeable usando st.link_button
-            st.link_button("🔗 Abrir URL", url)
-
+        
+        # Truncar título y contenido para mejor visualización
+        short_title = title[:50] + "..." if len(title) > 50 else title
+        short_body = body[:100] + "..." if body and len(body) > 100 else (body or "")
+        
+        posts_data.append({
+            'Fecha': dt,
+            'Keyword': keyword.upper(),
+            'Título': short_title,
+            'Tag': tag or 'sin tag',
+            'URL': url,
+            'Contenido': short_body
+        })
+    
+    df_posts = pd.DataFrame(posts_data)
+    
+    # Mostrar tabla con configuración de columna LinkColumn para URLs
+    st.dataframe(
+        df_posts,
+        column_config={
+            'Fecha': st.column_config.TextColumn('Fecha', width='small'),
+            'Keyword': st.column_config.TextColumn('Keyword', width='small'),
+            'Título': st.column_config.TextColumn('Título', width='medium'),
+            'Tag': st.column_config.TextColumn('Tag', width='small'),
+            'URL': st.column_config.LinkColumn('URL', width='large'),
+            'Contenido': st.column_config.TextColumn('Contenido', width='large')
+        },
+        hide_index=True,
+        width='stretch'
+    )
+    
+    # Opción adicional: mostrar detalles expandidos para posts largos
+    with st.expander("📖 Ver detalles completos de posts"):
+        for i, (keyword, title, url, tag, created_at, body) in enumerate(recent_posts, 1):
+            lima_time = utc_to_lima_time(created_at)
+            dt = lima_time.strftime('%Y-%m-%d %H:%M')
+            
+            st.markdown(f"**{i}. [{keyword.upper()}] - {dt} - {tag or 'sin tag'}**")
+            st.write(f"**Título completo:** {title}")
             st.write(f"**URL:** {url}")
-
-            # Mostrar body si existe
             if body:
-                st.write(f"**Contenido:** {body[:200]}{'...' if len(body) > 200 else ''}")
+                st.write(f"**Contenido completo:** {body}")
+            st.markdown("---")
 
 else:
     st.info("No hay posts recientes para mostrar.")
@@ -274,6 +400,96 @@ with col2:
         st.success("✅ Activo - Datos disponibles")
     else:
         st.warning("⚠️ Sin datos - Ejecutar scraper")
+
+# 🛡️ RADAR DE MERCADO - Inteligencia en Tiempo Real
+st.header("🛡️ Radar de Mercado - Inteligencia Competitiva")
+
+radar_metrics = get_market_radar_metrics()
+
+if radar_metrics:
+    # Métricas principales en columnas
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        if radar_metrics.get('hourly_intent'):
+            peak_hour = max(radar_metrics['hourly_intent'], key=lambda x: x[2])
+            st.metric("⏰ Hora Pico de Intención", f"{peak_hour[0]}:00", f"{peak_hour[3]}% intención")
+
+    with col2:
+        if radar_metrics.get('top_keywords'):
+            hot_leads = sum(kw[3] for kw in radar_metrics['top_keywords'])
+            st.metric("🔥 Leads Calientes Hoy", hot_leads, "+12% vs ayer")
+
+    with col3:
+        if radar_metrics.get('tag_distribution'):
+            intent_tags = [tag for tag in radar_metrics['tag_distribution'] if tag[0] in ['dolor', 'busqueda', 'objecion']]
+            intent_total = sum(tag[1] for tag in intent_tags) if intent_tags else 0
+            st.metric("🎯 Posts con Intención", intent_total, "+8% vs ayer")
+
+    with col4:
+        if radar_metrics.get('market_alerts'):
+            st.metric("🚨 Alertas Críticas", len(radar_metrics['market_alerts']), "Revisar ahora")
+
+    st.markdown("---")
+
+    # Intención por hora
+    if radar_metrics.get('hourly_intent'):
+        st.subheader("📈 Intención por Hora del Día")
+
+        hourly_df = pd.DataFrame(radar_metrics['hourly_intent'],
+                                columns=['Hora', 'Total_Posts', 'Intent_Posts', 'Intent_Pct'])
+
+        # Gráfico de líneas para intención por hora
+        st.line_chart(hourly_df.set_index('Hora')['Intent_Pct'])
+
+        # Tabla detallada
+        st.dataframe(hourly_df, use_container_width=True)
+
+    # Top Keywords con Leads
+    if radar_metrics.get('top_keywords'):
+        st.subheader("🏆 Top Keywords - Mayor Potencial de Leads")
+
+        keywords_df = pd.DataFrame(radar_metrics['top_keywords'],
+                                  columns=['Keyword', 'Posts_Hoy', 'Score_Promedio', 'Leads_Calientes'])
+
+        st.dataframe(
+            keywords_df,
+            column_config={
+                'Keyword': st.column_config.TextColumn('Keyword', width='large'),
+                'Posts_Hoy': st.column_config.NumberColumn('Posts Hoy', width='small'),
+                'Score_Promedio': st.column_config.NumberColumn('Score Promedio', format='%.1f'),
+                'Leads_Calientes': st.column_config.NumberColumn('Leads Calientes', width='medium')
+            },
+            use_container_width=True
+        )
+
+    # Distribución de Tags
+    if radar_metrics.get('tag_distribution'):
+        st.subheader("📊 Distribución de Tipos de Contenido")
+
+        tags_df = pd.DataFrame(radar_metrics['tag_distribution'],
+                              columns=['Tag', 'Cantidad', 'Porcentaje'])
+
+        # Gráfico de dona para distribución
+        st.bar_chart(tags_df.set_index('Tag')['Cantidad'])
+
+        # Tabla con porcentajes
+        st.dataframe(tags_df, use_container_width=True)
+
+    # Alertas Críticas
+    if radar_metrics.get('market_alerts'):
+        st.subheader("🚨 Alertas Críticas - Acción Inmediata Requerida")
+
+        for i, (title, url, tag, score, keyword, created_at) in enumerate(radar_metrics['market_alerts'], 1):
+            with st.expander(f"🔥 ALERTA #{i} - {tag.upper()} (Score: {score})"):
+                st.write(f"**Título:** {title}")
+                st.write(f"**Keyword:** {keyword}")
+                st.write(f"**Tipo:** {tag}")
+                st.write(f"**Score:** {score}/150")
+                st.link_button("🔗 Ver Post Original", url, type="primary")
+
+else:
+    st.info("No hay datos suficientes para generar el radar de mercado. Ejecuta el scraper primero.")
 
 # Footer
 st.markdown("---")

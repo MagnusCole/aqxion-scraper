@@ -1,6 +1,7 @@
 import requests
 import logging
-from typing import Optional
+import datetime as dt
+from typing import Optional, List
 from config import KEYWORDS
 
 # Configuración de logging
@@ -77,24 +78,54 @@ class AlertSystem:
         # Log para seguimiento
         log.warning(f"🚨 HIGH VALUE LEAD ALERT: {intent_type} | {keyword} | Score: {score}")
 
-    def alert_daily_summary(self, actionable_dolores: int, provider_searches: int, total_leads: int):
-        """Enviar resumen diario de leads"""
-        message = f"""📊 <b>RESUMEN DIARIO DE LEADS</b> 📊
+    def alert_daily_summary(self, actionable_dolores: int, provider_searches: int, total_leads: int, top_keywords: Optional[List] = None):
+        """Enviar resumen diario de actividad"""
+        if not self.base_url or not self.telegram_chat_id:
+            return
 
-💰 <b>Dolores únicos accionables:</b> {actionable_dolores}
-🔍 <b>Búsquedas proveedor activas:</b> {provider_searches}
-🎯 <b>Total leads potenciales:</b> {total_leads}
+        message = f"""📊 <b>RESUMEN DIARIO - AQXION SCRAPER</b> 📊
 
-📈 <b>Top Keywords del día:</b>
-{self._get_top_keywords_summary()}
+� <b>Fecha:</b> {dt.date.today().strftime('%Y-%m-%d')}
 
-🚀 <b>¡Listo para generar ingresos!</b>"""
+🔥 <b>Dolores Accionables:</b> {actionable_dolores}
+🔍 <b>Búsquedas Proveedor:</b> {provider_searches}
+📈 <b>Total Leads:</b> {total_leads}
+
+💰 <b>Valor Potencial:</b> ${total_leads * 150:,} - ${total_leads * 500:,} (estimado)"""
+
+        if top_keywords:
+            message += "\n\n🏆 <b>Top Keywords del Día:</b>\n"
+            for i, (keyword, count) in enumerate(top_keywords[:5], 1):
+                message += f"{i}. {keyword} ({count} posts)\n"
+
+        message += "\n\n⚡ <b>Próximos Pasos:</b>\n"
+        message += "• Contactar leads de alta calidad\n"
+        message += "• Crear contenido basado en dolores\n"
+        message += "• Actualizar estrategias de marketing"
 
         self.send_telegram_message(message)
 
-    def _get_top_keywords_summary(self) -> str:
-        """Obtener resumen de top keywords (placeholder)"""
-        return "• Implementar lógica para mostrar top 5 keywords"
+    def alert_system_status(self, status: str, details: str = ""):
+        """Enviar alerta de estado del sistema"""
+        if not self.base_url or not self.telegram_chat_id:
+            return
+
+        emoji_map = {
+            "started": "🚀",
+            "completed": "✅",
+            "error": "❌",
+            "warning": "⚠️",
+            "info": "ℹ️"
+        }
+
+        emoji = emoji_map.get(status.lower(), "📢")
+        message = f"""{emoji} <b>SISTEMA AQXION</b> {emoji}
+
+<b>Estado:</b> {status.upper()}
+<b>Detalles:</b> {details}
+<b>Hora:</b> {dt.datetime.now().strftime('%H:%M:%S')}"""
+
+        self.send_telegram_message(message)
 
 # Instancia global del sistema de alertas
 alert_system = AlertSystem()
@@ -106,14 +137,25 @@ def configure_alerts(telegram_token: Optional[str] = None, telegram_chat_id: Opt
 
     if telegram_token and telegram_chat_id:
         log.info("✅ Sistema de alertas configurado con Telegram")
+        # Enviar alerta de configuración exitosa
+        alert_system.alert_system_status("configurado", "Sistema de alertas operativo")
     else:
         log.warning("⚠️ Sistema de alertas no configurado - usar variables de entorno TELEGRAM_TOKEN y TELEGRAM_CHAT_ID")
+
+def auto_configure_alerts():
+    """Configuración automática desde variables de entorno"""
+    from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    configure_alerts(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
 # Funciones de conveniencia
 def alert_lead(title: str, body: str, url: str, keyword: str, tag: str, score: int):
     """Función de conveniencia para alertar leads"""
     alert_system.alert_high_value_lead(title, body, url, keyword, tag, score)
 
-def alert_daily_summary(actionable_dolores: int, provider_searches: int, total_leads: int):
+def alert_daily_summary(actionable_dolores: int, provider_searches: int, total_leads: int, top_keywords: Optional[List] = None):
     """Función de conveniencia para resumen diario"""
-    alert_system.alert_daily_summary(actionable_dolores, provider_searches, total_leads)
+    alert_system.alert_daily_summary(actionable_dolores, provider_searches, total_leads, top_keywords)
+
+def alert_system_status(status: str, details: str = ""):
+    """Función de conveniencia para alertas de sistema"""
+    alert_system.alert_system_status(status, details)
