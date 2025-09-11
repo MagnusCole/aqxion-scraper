@@ -27,7 +27,7 @@ def kpi():
     print(f"Búsquedas proveedor: {busquedas or 0}")
     print(f"Ruido: {ruido or 0}")
     print(f"Total únicos: {total or 0}")
-    print(".1f")
+    print(f"% de intención (dolor+objecion+busqueda): {intencion_pct:.1f}%")
     # Top keywords por intención
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()

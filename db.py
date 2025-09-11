@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tag ON posts(tag);
 CREATE INDEX IF NOT EXISTS idx_posts_keyword ON posts(keyword);
+CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at);
 """
 
 @contextmanager
