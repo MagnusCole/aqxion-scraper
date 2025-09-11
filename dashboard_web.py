@@ -20,9 +20,9 @@ def get_today_data():
     con = get_db_connection()
     cur = con.cursor()
 
-    # Posts de hoy
-    today = datetime.now().date()
-    cur.execute('SELECT * FROM posts WHERE DATE(created_at) = ?', (today,))
+    # Posts de hoy - usar comparación de strings para evitar problemas de DATE()
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    cur.execute("SELECT * FROM posts WHERE created_at LIKE ?", (f"{today_str}%",))
     today_posts = cur.fetchall()
 
     con.close()
@@ -113,7 +113,7 @@ if today_posts:
         # Mostrar tabla con posts relevantes
         st.dataframe(
             relevant_posts[['keyword', 'title', 'tag', 'created_at']].sort_values('created_at', ascending=False),
-            use_container_width=True
+            width='stretch'
         )
     else:
         st.info("No hay posts relevantes (dolor/búsqueda/objeción) registrados hoy.")
