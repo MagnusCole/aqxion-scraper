@@ -14,12 +14,14 @@ CREATE TABLE IF NOT EXISTS posts (
     created_at TEXT NOT NULL,
     keyword TEXT,
     tag TEXT,
-    published_at TEXT
+    published_at TEXT,
+    relevance_score INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
 CREATE INDEX IF NOT EXISTS idx_posts_tag ON posts(tag);
 CREATE INDEX IF NOT EXISTS idx_posts_keyword ON posts(keyword);
 CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at);
+CREATE INDEX IF NOT EXISTS idx_posts_score ON posts(relevance_score);
 """
 
 @contextmanager
@@ -35,9 +37,46 @@ def init_db():
         c.executescript(DDL)
 
 def upsert_post(p):
-    with get_conn() as c:
-        c.execute("""
-        INSERT OR REPLACE INTO posts(id, source, url, title, body, lang, created_at, keyword, tag, published_at)
-        VALUES(:id, :source, :url, :title, :body, :lang, :created_at, :keyword, :tag, :published_at)
-        """, p)
-        c.commit()
+    # Validación de tipos y valores requeridos
+    if not isinstance(p, dict):
+        raise ValueError("El parámetro 'p' debe ser un diccionario")
+    
+    required_fields = ['id', 'source', 'url', 'created_at']
+    for field in required_fields:
+        if field not in p or p[field] is None:
+            raise ValueError(f"El campo requerido '{field}' no puede ser None")
+    
+    # Validar tipos de datos
+    if not isinstance(p['id'], str) or not p['id'].strip():
+        raise ValueError("El campo 'id' debe ser una cadena no vacía")
+    
+    if not isinstance(p['source'], str) or not p['source'].strip():
+        raise ValueError("El campo 'source' debe ser una cadena no vacía")
+    
+    if not isinstance(p['url'], str) or not p['url'].strip():
+        raise ValueError("El campo 'url' debe ser una cadena no vacía")
+    
+    if not isinstance(p['created_at'], str) or not p['created_at'].strip():
+        raise ValueError("El campo 'created_at' debe ser una cadena no vacía")
+    
+    # Campos opcionales - asegurar que sean strings o None
+    optional_fields = ['title', 'body', 'lang', 'keyword', 'tag', 'published_at']
+    for field in optional_fields:
+        if field in p and p[field] is not None and not isinstance(p[field], str):
+            p[field] = str(p[field])
+    
+    # Asegurar que relevance_score sea un entero
+    if 'relevance_score' in p:
+        p['relevance_score'] = int(p.get('relevance_score', 0))
+    else:
+        p['relevance_score'] = 0
+    
+    try:
+        with get_conn() as c:
+            c.execute("""
+            INSERT OR REPLACE INTO posts(id, source, url, title, body, lang, created_at, keyword, tag, published_at, relevance_score)
+            VALUES(:id, :source, :url, :title, :body, :lang, :created_at, :keyword, :tag, :published_at, :relevance_score)
+            """, p)
+            c.commit()
+    except sqlite3.Error as e:
+        raise Exception(f"Error al insertar post en base de datos: {e}")
