@@ -9,6 +9,13 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from pydantic.types import SecretStr
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 
 class ScrapingSettings(BaseSettings):
     """Settings for web scraping operations"""

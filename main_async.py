@@ -10,6 +10,7 @@ import re
 import logging
 import os
 import random
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set, Any
 from urllib.parse import urljoin, urlparse
@@ -29,9 +30,9 @@ from config_v2 import get_settings, ScrapingSettings, DatabaseSettings
 from db import init_db, upsert_post
 from sources import search_urls_for
 from rules import tag_item
-from alerts import alert_lead, AlertSystem, auto_configure_alerts, alert_system_status
-from cache_system import cache_manager
-from scrapling_simple import scrapling_scraper
+from simple_alerts import alert_lead, AlertSystem, auto_configure_alerts, alert_system_status
+from simple_cache import cache_manager
+from simple_scrapling import scrapling_scraper
 from ai_service import ai_service
 
 # ConfiguraciÃ³n
@@ -46,8 +47,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("aqxion")
 
-# Cache local para rate limiting
-domain_last_request: Dict[str, float] = {}
+# Cache simple para reemplazar cache_manager
+url_cache = TTLCache(maxsize=1000, ttl=3600)  # 1 hour TTL
+content_cache = TTLCache(maxsize=500, ttl=1800)  # 30 min TTL
+intent_cache = TTLCache(maxsize=2000, ttl=7200)  # 2 hours TTL
 domain_error_count: Dict[str, int] = {}
 domain_backoff_until: Dict[str, float] = {}
 
@@ -260,8 +263,6 @@ class AsyncScraper:
     def __init__(self):
         self.rate_limiter = AsyncRateLimiter()
         self.session: Optional[ClientSession] = None
-        self.alert_system = AlertSystem()
-        self.cache_manager = cache_manager
 
     async def __aenter__(self):
         """Inicializar recursos asÃ­ncronos"""
@@ -545,27 +546,25 @@ class AsyncScraper:
             log.info(f"🔍 Scraping with Scrapling: {url}")
 
             # Usar Scrapling para scraping mejorado
-            result = scrapling_scraper.scrape_url(url)
+            result = await scrapling_scraper.scrape_url(url)
 
-            if result['status'] != 'success':
+            if result and result.get('status') != 200:
                 log.warning(f"Scrapling scrape failed for {url}: {result.get('error', 'Unknown error')}")
                 return None
 
             # Extraer información del resultado de Scrapling
+            if not result:
+                return None
+
             title = result.get('title', '')
             if not title:
                 log.debug(f"No title found for {url}")
                 return None
 
-            # Usar el texto completo como body
-            body = result.get('full_text', '')
+            # Usar el contenido como body
+            body = result.get('content', '')
             if not body:
-                # Fallback: usar el primer texto encontrado
-                texts = result.get('texts_found', [])
-                if texts > 0:
-                    body = "Contenido encontrado pero no clasificado"
-                else:
-                    body = ""
+                body = "Contenido no disponible"
 
             # Limpiar y truncar body
             if body:
@@ -704,14 +703,14 @@ class AsyncScraper:
                     # Alertas para leads de alto valor
                     if (post.tag in ['dolor', 'busqueda'] and
                         post.relevance_score >= scraping_config.high_value_threshold):
-                        alert_lead(
-                            title=post.title or "",
-                            body=post.body or "",
-                            url=post.url,
-                            keyword=post.keyword,
-                            tag=post.tag,
-                            score=post.relevance_score
-                        )
+                        alert_lead({
+                            "title": post.title or "",
+                            "body": post.body or "",
+                            "url": post.url,
+                            "keyword": post.keyword,
+                            "tag": post.tag,
+                            "score": post.relevance_score
+                        })
 
                 except Exception as e:
                     log.error(f"Error guardando post {post.id}: {e}")
@@ -804,17 +803,17 @@ async def main():
                 # Debug: intentar scrapear manualmente para ver qué pasa
                 print("🔍 Debug: Intentando scraping manual...")
                 try:
-                    result = scrapling_scraper.scrape_url(args.test_url)
-                    print(f"   Scrapling Status: {result.get('status')}")
-                    print(f"   Title: {result.get('title', 'N/A')}")
-                    print(f"   Content Length: {result.get('content_length', 0)}")
-                    print(f"   Texts Found: {result.get('texts_found', 0)}")
-                    print(f"   Classifications: {result.get('classification_count', 0)}")
+                    result = await scrapling_scraper.scrape_url(args.test_url)
+                    if result:
+                        print(f"   Scrapling Status: {result.get('status')}")
+                        print(f"   Content Length: {len(result.get('content', ''))}")
+                        print(f"   Success: {result.get('success', False)}")
 
-                    if result.get('status') == 'success':
-                        title = result.get('title', '')
-                        body = result.get('full_text', '')
-                        print(f"   Body Preview: {body[:100] if body else 'Empty'}...")
+                        if result.get('success'):
+                            content = result.get('content', '')
+                            print(f"   Content Preview: {content[:100] if content else 'Empty'}...")
+                    else:
+                        print("   No result returned")
 
                         # Probar validación de calidad
                         is_valid, reason = scraper.validate_content_quality(title, body)

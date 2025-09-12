@@ -18,7 +18,7 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 from config_v2 import get_settings
-from cache_system import cache_manager
+from simple_cache import cache_manager
 
 settings = get_settings()
 
@@ -125,22 +125,40 @@ class AIService:
             Título: {title}
             Texto: {body or 'Sin contenido adicional'}
 
-            Responde SOLO con un JSON válido en este formato:
-            {{
-                "tag": "dolor|busqueda|objecion|ruido",
-                "confidence": 0.0-1.0,
-                "reasoning": "explicación breve de la clasificación"
-            }}
+            IMPORTANTE: Responde ÚNICAMENTE con un objeto JSON válido en este formato exacto:
+            {{"tag": "dolor|busqueda|objecion|ruido", "confidence": 0.0-1.0, "reasoning": "explicación breve"}}
+
+            No incluyas ningún texto adicional, solo el JSON puro.
             """
 
-            response = await self.client.chat.completions.create(
-                model=settings.openai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=min(settings.openai.max_tokens_per_request, 500),
-                temperature=0.1
-            )
+            # Prepare request parameters based on model
+            request_params = {
+                "model": settings.openai.model,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            
+            # GPT-5 Nano only supports default temperature (1), no other values
+            if "gpt-5-nano" not in settings.openai.model:
+                request_params["temperature"] = 0.1
+            
+            # Add reasoning_effort for GPT-5 models
+            if "gpt-5" in settings.openai.model:
+                request_params["reasoning_effort"] = "low"
+            
+            # GPT-5 Nano uses max_completion_tokens instead of max_tokens
+            if "gpt-5-nano" in settings.openai.model:
+                request_params["max_completion_tokens"] = min(settings.openai.max_tokens_per_request, 500)
+            else:
+                request_params["max_tokens"] = min(settings.openai.max_tokens_per_request, 500)
 
-            result_text = response.choices[0].message.content.strip()
+            response = await self.client.chat.completions.create(**request_params)
+
+            result_text = response.choices[0].message.content
+            if not result_text:
+                print("❌ Empty response from OpenAI API")
+                return None
+
+            result_text = result_text.strip()
 
             # Parse JSON response
             try:
@@ -191,33 +209,39 @@ class AIService:
             return None
 
         try:
-            prompt = f"""
-            Genera {count} keywords relevantes para buscar oportunidades de negocio en el sector de {industry} en Perú.
+            prompt = f"""Genera {min(count, 5)} keywords para marketing digital en Perú.
 
-            Consideraciones:
-            - Keywords que indiquen problemas o necesidades (dolor)
-            - Keywords de búsqueda activa de servicios
-            - Keywords de comparación o evaluación
-            - Incluir variaciones regionales (Lima, Perú)
-            - Mezclar términos técnicos y coloquiales
-            - Enfocarse en PYMES y emprendimientos
+Responde solo con JSON:
+{{"keywords": ["keyword1", "keyword2", "keyword3"], "reasoning": "explicación"}}"""
 
-            Responde con un JSON válido:
-            {{
-                "keywords": ["keyword1", "keyword2", ...],
-                "reasoning": "explicación de por qué estos keywords son relevantes",
-                "market_trends": ["tendencia1", "tendencia2", ...]
-            }}
-            """
+            # Prepare request parameters based on model
+            request_params = {
+                "model": settings.openai.model,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            
+            # GPT-5 Nano only supports default temperature (1), no other values
+            if "gpt-5-nano" not in settings.openai.model:
+                request_params["temperature"] = 0.7
+            
+            # Add reasoning_effort for GPT-5 models
+            if "gpt-5" in settings.openai.model:
+                request_params["reasoning_effort"] = "low"
+            
+            # GPT-5 Nano uses max_completion_tokens instead of max_tokens
+            if "gpt-5-nano" in settings.openai.model:
+                request_params["max_completion_tokens"] = min(settings.openai.max_tokens_per_request, 1000)
+            else:
+                request_params["max_tokens"] = min(settings.openai.max_tokens_per_request, 1000)
 
-            response = await self.client.chat.completions.create(
-                model=settings.openai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=min(settings.openai.max_tokens_per_request, 1000),
-                temperature=0.7
-            )
+            response = await self.client.chat.completions.create(**request_params)
 
-            result_text = response.choices[0].message.content.strip()
+            result_text = response.choices[0].message.content
+            if not result_text:
+                print("❌ Empty response from OpenAI API")
+                return None
+
+            result_text = result_text.strip()
 
             # Parse JSON response
             try:
@@ -239,6 +263,7 @@ class AIService:
 
             except json.JSONDecodeError as e:
                 print(f"❌ Failed to parse AI keyword response: {e}")
+                print(f"🔍 Debug - Raw response was: '{result_text}'")
                 return None
 
         except Exception as e:
@@ -291,14 +316,30 @@ class AIService:
             Responde SOLO con un número entero entre 0-150.
             """
 
-            response = await self.client.chat.completions.create(
-                model=settings.openai.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=10,
-                temperature=0.1
-            )
+            # Prepare request parameters based on model
+            request_params = {
+                "model": settings.openai.model,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            
+            # GPT-5 Nano only supports default temperature (1), no other values
+            if "gpt-5-nano" not in settings.openai.model:
+                request_params["temperature"] = 0.1
+            
+            # GPT-5 Nano uses max_completion_tokens instead of max_tokens
+            if "gpt-5-nano" in settings.openai.model:
+                request_params["max_completion_tokens"] = 10
+            else:
+                request_params["max_tokens"] = 10
 
-            result_text = response.choices[0].message.content.strip()
+            response = await self.client.chat.completions.create(**request_params)
+
+            result_text = response.choices[0].message.content
+            if not result_text:
+                print("❌ Empty response from OpenAI API")
+                return None
+
+            result_text = result_text.strip()
 
             # Parse numeric response
             try:
