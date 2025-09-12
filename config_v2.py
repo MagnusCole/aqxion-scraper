@@ -41,7 +41,7 @@ class ScrapingSettings(BaseSettings):
 
     # Rate limiting
     domain_rate_limit: float = Field(default=0.5, ge=0.1, le=5.0, description="Seconds between requests to same domain")
-    max_backoff_delay: int = Field(default=30, ge=5, le=300, description="Maximum backoff delay in seconds")
+    max_backoff_delay: int = Field(default=5, ge=1, le=300, description="Maximum backoff delay in seconds")
 
     # Content filtering
     min_title_length: int = Field(default=15, ge=5, le=100, description="Minimum title length to process")
@@ -50,6 +50,12 @@ class ScrapingSettings(BaseSettings):
     # Quality thresholds
     min_relevance_score: int = Field(default=70, ge=0, le=150, description="Minimum relevance score for alerts")
     high_value_threshold: int = Field(default=80, ge=0, le=150, description="Threshold for high-value lead alerts")
+
+    # Search engine settings
+    search_engine: str = Field(default="google", pattern=r"^(google|duckduckgo|mock)$", description="Search engine to use")
+    google_api_key: Optional[str] = Field(default=None, description="Google Custom Search API key")
+    google_cse_id: Optional[str] = Field(default=None, description="Google Custom Search Engine ID")
+    search_results_per_keyword: int = Field(default=10, ge=1, le=50, description="Number of search results per keyword")
 
     class Config:
         env_prefix = "SCRAPING_"

@@ -2,7 +2,9 @@ import requests
 import logging
 import datetime as dt
 from typing import Optional, List
-from config import KEYWORDS
+from config_v2 import get_settings
+
+settings = get_settings()
 
 # Configuración de logging
 log = logging.getLogger("alerts")
@@ -144,8 +146,10 @@ def configure_alerts(telegram_token: Optional[str] = None, telegram_chat_id: Opt
 
 def auto_configure_alerts():
     """Configuración automática desde variables de entorno"""
-    from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-    configure_alerts(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    configure_alerts(
+        settings.alerts.telegram_token.get_secret_value() if settings.alerts.telegram_token else None,
+        settings.alerts.telegram_chat_id
+    )
 
 # Funciones de conveniencia
 def alert_lead(title: str, body: str, url: str, keyword: str, tag: str, score: int):

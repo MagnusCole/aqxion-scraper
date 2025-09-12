@@ -33,10 +33,10 @@ def get_today_data():
     cur = con.cursor()
 
     try:
-        # Usar DATE('now','utc') para consistencia con UTC
+        # Usar zona horaria local para consistencia
         cur.execute("""
             SELECT * FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
         """)
         today_posts = cur.fetchall()
         return today_posts
@@ -64,7 +64,7 @@ def get_market_radar_metrics():
                     1
                 ) as intent_pct
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             GROUP BY hour
             ORDER BY hour
         """)
@@ -78,7 +78,7 @@ def get_market_radar_metrics():
                 AVG(relevance_score) as avg_score,
                 SUM(CASE WHEN tag IN ('dolor', 'busqueda') THEN 1 ELSE 0 END) as hot_leads
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             AND keyword IS NOT NULL
             GROUP BY keyword
             HAVING posts_today >= 3
@@ -94,7 +94,7 @@ def get_market_radar_metrics():
                 COUNT(*) as count,
                 ROUND((COUNT(*) * 100.0) / SUM(COUNT(*)) OVER (), 1) as percentage
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             AND tag IS NOT NULL
             GROUP BY tag
             ORDER BY count DESC
@@ -111,7 +111,7 @@ def get_market_radar_metrics():
                 keyword,
                 created_at
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             AND tag IN ('dolor', 'busqueda')
             AND relevance_score >= 80
             ORDER BY relevance_score DESC, created_at DESC
@@ -143,20 +143,20 @@ def get_kpis():
         result = cur.fetchone()
         total_posts = result[0] if result else 0
 
-        # Posts por intención - usar DATE('now','utc') para consistencia
+        # Posts por intención - usar zona horaria local
         cur.execute("""
-            SELECT tag, COUNT(*) FROM posts 
-            WHERE DATE(created_at) = DATE('now','utc') AND tag IS NOT NULL 
+            SELECT tag, COUNT(*) FROM posts
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime') AND tag IS NOT NULL
             GROUP BY tag
         """)
         intent_results = cur.fetchall()
         intent_counts = dict(intent_results) if intent_results else {}
 
-        # Top keywords por intención - usar DATE('now','utc')
+        # Top keywords por intención - usar zona horaria local
         cur.execute('''
             SELECT keyword, tag, COUNT(*) as count
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc') AND tag IS NOT NULL
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime') AND tag IS NOT NULL
             GROUP BY keyword, tag
             ORDER BY count DESC
             LIMIT 10
@@ -185,8 +185,8 @@ def get_keyword_kpis():
                     (SUM(CASE WHEN tag IN ('dolor', 'objecion', 'busqueda') THEN 1 ELSE 0 END) * 100.0) / COUNT(*), 
                     1
                 ) as intencion_pct
-            FROM posts 
-            WHERE DATE(created_at) = DATE('now','utc')
+            FROM posts
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             GROUP BY keyword
             ORDER BY intencion_pct DESC, total_posts DESC
             LIMIT 10
@@ -208,7 +208,7 @@ def get_recent_posts(limit=10):
         cur.execute('''
             SELECT keyword, title, url, tag, created_at, body
             FROM posts
-            WHERE DATE(created_at) = DATE('now','utc')
+            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             ORDER BY created_at DESC
             LIMIT ?
         ''', (limit,))
@@ -253,7 +253,7 @@ st.subheader("📅 Posts de Hoy por Intención")
 today_posts = get_today_data()
 if today_posts:
     # Convertir a DataFrame para mejor visualización
-    df_today = pd.DataFrame(today_posts, columns=['id', 'source', 'url', 'title', 'body', 'lang', 'created_at', 'keyword', 'tag', 'published_at'])
+    df_today = pd.DataFrame(today_posts, columns=['id', 'source', 'url', 'title', 'body', 'lang', 'created_at', 'keyword', 'tag', 'published_at', 'relevance_score'])
     
     # Convertir fechas UTC a hora local de Lima
     df_today['created_at'] = df_today['created_at'].apply(utc_to_lima_time)
@@ -265,7 +265,7 @@ if today_posts:
     if not relevant_posts.empty:
         # Mostrar tabla con posts relevantes
         st.dataframe(
-            relevant_posts[['keyword', 'title', 'tag', 'created_at_display']].sort_values('created_at', ascending=False),
+            relevant_posts[['keyword', 'title', 'tag', 'created_at_display']].sort_values('created_at_display', ascending=False),
             width='stretch'
         )
     else:
