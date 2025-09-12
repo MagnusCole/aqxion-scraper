@@ -1,9 +1,11 @@
 import sqlite3, datetime as dt
 from alerts import alert_daily_summary
+from config_v2 import get_settings
 
 DB_PATH = "scraping.db"
 
 def kpi():
+    settings = get_settings()
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
 
@@ -49,8 +51,8 @@ def kpi():
                 WHERE DATE(p.created_at, 'localtime') = DATE('now', 'localtime')
                 AND p.tag='dolor'
                 AND (LENGTH(p.title) > 30 OR LENGTH(p.body) > 50)
-                AND p.relevance_score > 80
-            """)
+                AND p.relevance_score > ?
+            """, (settings.scraping.min_relevance_score,))
             actionable_dolores = cur.fetchone()[0]
 
         # Búsquedas proveedor activas
@@ -69,17 +71,17 @@ def kpi():
         cur.execute("""
             SELECT
                 keyword,
-                SUM(CASE WHEN tag='dolor' AND relevance_score > 80 THEN 1 ELSE 0 END) as dolores_calidad,
+                SUM(CASE WHEN tag='dolor' AND relevance_score > ? THEN 1 ELSE 0 END) as dolores_calidad,
                 SUM(CASE WHEN tag='busqueda' THEN 1 ELSE 0 END) as busquedas_proveedor,
                 COUNT(*) as total_posts,
-                (SUM(CASE WHEN tag='dolor' AND relevance_score > 80 THEN 1 ELSE 0 END) +
+                (SUM(CASE WHEN tag='dolor' AND relevance_score > ? THEN 1 ELSE 0 END) +
                  SUM(CASE WHEN tag='busqueda' THEN 1 ELSE 0 END)) as leads_potenciales
             FROM posts
             WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
             GROUP BY keyword
             ORDER BY leads_potenciales DESC, total_posts DESC
             LIMIT 5
-        """)
+        """, (settings.scraping.min_relevance_score, settings.scraping.min_relevance_score))
         revenue_keywords = cur.fetchall()
 
         if revenue_keywords:

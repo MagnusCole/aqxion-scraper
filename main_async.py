@@ -32,6 +32,7 @@ from rules import tag_item
 from alerts import alert_lead, AlertSystem, auto_configure_alerts, alert_system_status
 from cache_system import cache_manager
 from scrapling_simple import scrapling_scraper
+from ai_service import ai_service
 
 # ConfiguraciÃ³n
 settings = get_settings()
@@ -83,19 +84,48 @@ class TokenBucketRateLimiter:
         self.domain_burst_capacity = {}  # capacidad máxima por dominio
         self.domain_refill_rate = {}  # tokens por segundo por dominio
 
-        # Configuraciones por defecto
-        self.default_burst_capacity = 10  # máximo 10 requests en burst
-        self.default_refill_rate = 2.0  # 2 tokens por segundo
-        self.jitter_range = (0.1, 0.5)  # jitter entre 0.1s y 0.5s
+        # Usar configuración centralizada
+        self.default_burst_capacity = scraping_config.token_bucket_burst_capacity
+        self.default_refill_rate = scraping_config.token_bucket_refill_rate
+        self.jitter_range = (
+            scraping_config.token_bucket_jitter_min,
+            scraping_config.token_bucket_jitter_max
+        )
 
-        # Overrides para dominios sensibles
+        # Overrides para dominios sensibles usando configuración centralizada
         self.sensitive_domains = {
-            'google.com': {'burst': 3, 'rate': 0.5},
-            'bing.com': {'burst': 3, 'rate': 0.5},
-            'duckduckgo.com': {'burst': 5, 'rate': 1.0},
-            'facebook.com': {'burst': 2, 'rate': 0.3},
-            'twitter.com': {'burst': 3, 'rate': 0.5},
-            'linkedin.com': {'burst': 2, 'rate': 0.3},
+            'google.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'bing.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'duckduckgo.com': {
+                'burst': scraping_config.normal_domain_burst,
+                'rate': scraping_config.normal_domain_rate
+            },
+            'facebook.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'twitter.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'linkedin.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'instagram.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
+            'tiktok.com': {
+                'burst': scraping_config.sensitive_domain_burst,
+                'rate': scraping_config.sensitive_domain_rate
+            },
         }
 
     def _get_domain_config(self, domain: str) -> Dict[str, float]:
@@ -406,6 +436,39 @@ class AsyncScraper:
 
         return min(base_score + bonus, 150)
 
+    async def get_cached_intent_tag(self, text: str, title: str = "") -> str:
+        """Obtener tag de intención usando cache e IA para mejorar rendimiento y precisión"""
+        if not text or not text.strip():
+            return 'ruido'
+
+        # Intentar obtener del caché primero
+        cached_tag = await self.cache_manager.get_cached_intent_analysis(text)
+        if cached_tag:
+            log.debug(f"Cache hit for intent analysis: {cached_tag}")
+            return cached_tag
+
+        # Intentar clasificación con IA si está disponible
+        ai_result = await ai_service.classify_content_ai(title or text[:100], text)
+        if ai_result and ai_result.confidence > 0.7:  # Solo usar si confianza > 70%
+            tag = ai_result.tag
+            log.debug(f"AI classification: {tag} (confidence: {ai_result.confidence:.2f})")
+        else:
+            # Fallback a clasificación tradicional usando regex
+            tag = tag_item(text)
+            if ai_result:
+                log.debug(f"AI classification rejected (low confidence: {ai_result.confidence:.2f}), using regex: {tag}")
+            else:
+                log.debug(f"AI classification unavailable, using regex: {tag}")
+
+        # Cachear el resultado (TTL por defecto de Redis)
+        success = await self.cache_manager.set_cached_intent_analysis(text, tag)
+        if success:
+            log.debug(f"Cached intent analysis result: {tag}")
+        else:
+            log.warning("Failed to cache intent analysis result")
+
+        return tag
+
     def is_duplicate_post(self, title: str, body: Optional[str], url: str, keyword: str) -> bool:
         """Verificar duplicados usando cache multinivel y base de datos"""
         # Verificar en caché de URLs procesadas
@@ -526,9 +589,9 @@ class AsyncScraper:
                 # Fallback a clasificación tradicional usando el contenido completo
                 full_content = result.get('full_text', '')
                 if full_content:
-                    tag = tag_item(full_content)
+                    tag = await self.get_cached_intent_tag(full_content, title)
                 else:
-                    tag = tag_item(content_text)
+                    tag = await self.get_cached_intent_tag(content_text, title)
 
             # Si aún es ruido pero tenemos contenido válido, intentar clasificar mejor
             if tag == 'ruido' and body and len(body) > 20:
@@ -758,7 +821,7 @@ async def main():
                         print(f"   Quality Check: {'✅ PASS' if is_valid else '❌ FAIL'} - {reason}")
 
                         if is_valid:
-                            tag = tag_item(body or title)
+                            tag = await scraper.get_cached_intent_tag(body or title, title)
                             print(f"   Tag: {tag}")
                             if tag == 'ruido':
                                 print("   ⚠️ Tag is 'ruido' - content may not match classification patterns")

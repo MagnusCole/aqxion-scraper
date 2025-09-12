@@ -85,9 +85,14 @@ class AlertSystem:
         if not self.base_url or not self.telegram_chat_id:
             return
 
+        # Usar UTC y convertir a zona horaria de Lima para display
+        utc_now = dt.datetime.now(dt.timezone.utc)
+        lima_tz = dt.timezone(dt.timedelta(hours=-5))  # UTC-5 para Lima
+        lima_date = utc_now.astimezone(lima_tz).strftime('%Y-%m-%d')
+
         message = f"""📊 <b>RESUMEN DIARIO - AQXION SCRAPER</b> 📊
 
-� <b>Fecha:</b> {dt.date.today().strftime('%Y-%m-%d')}
+📅 <b>Fecha:</b> {lima_date}
 
 🔥 <b>Dolores Accionables:</b> {actionable_dolores}
 🔍 <b>Búsquedas Proveedor:</b> {provider_searches}
@@ -121,11 +126,17 @@ class AlertSystem:
         }
 
         emoji = emoji_map.get(status.lower(), "📢")
+
+        # Usar UTC y convertir a zona horaria de Lima para display
+        utc_now = dt.datetime.now(dt.timezone.utc)
+        lima_tz = dt.timezone(dt.timedelta(hours=-5))  # UTC-5 para Lima
+        lima_time = utc_now.astimezone(lima_tz).strftime('%H:%M:%S')
+
         message = f"""{emoji} <b>SISTEMA AQXION</b> {emoji}
 
 <b>Estado:</b> {status.upper()}
 <b>Detalles:</b> {details}
-<b>Hora:</b> {dt.datetime.now().strftime('%H:%M:%S')}"""
+<b>Hora:</b> {lima_time}"""
 
         self.send_telegram_message(message)
 

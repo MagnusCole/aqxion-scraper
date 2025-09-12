@@ -39,9 +39,21 @@ class ScrapingSettings(BaseSettings):
     max_per_keyword: int = Field(default=10, ge=1, le=100, description="Maximum posts per keyword")
     max_concurrent_requests: int = Field(default=5, ge=1, le=20, description="Maximum concurrent HTTP requests")
 
-    # Rate limiting
-    domain_rate_limit: float = Field(default=0.5, ge=0.1, le=5.0, description="Seconds between requests to same domain")
-    max_backoff_delay: int = Field(default=5, ge=1, le=300, description="Maximum backoff delay in seconds")
+    # Rate limiting - Optimizado para mejor rendimiento
+    domain_rate_limit: float = Field(default=0.2, ge=0.05, le=2.0, description="Seconds between requests to same domain (optimized)")
+    max_backoff_delay: int = Field(default=60, ge=5, le=600, description="Maximum backoff delay in seconds (increased)")
+
+    # Token bucket settings - Nuevo sistema avanzado
+    token_bucket_burst_capacity: int = Field(default=15, ge=5, le=50, description="Maximum tokens in burst capacity")
+    token_bucket_refill_rate: float = Field(default=3.0, ge=0.5, le=10.0, description="Tokens refilled per second")
+    token_bucket_jitter_min: float = Field(default=0.05, ge=0.01, le=0.5, description="Minimum jitter delay")
+    token_bucket_jitter_max: float = Field(default=0.3, ge=0.1, le=1.0, description="Maximum jitter delay")
+
+    # Domain-specific overrides - Configuración granular por dominio
+    sensitive_domain_burst: int = Field(default=3, ge=1, le=10, description="Burst capacity for sensitive domains")
+    sensitive_domain_rate: float = Field(default=0.5, ge=0.1, le=2.0, description="Refill rate for sensitive domains")
+    normal_domain_burst: int = Field(default=12, ge=5, le=30, description="Burst capacity for normal domains")
+    normal_domain_rate: float = Field(default=2.5, ge=0.5, le=8.0, description="Refill rate for normal domains")
 
     # Content filtering
     min_title_length: int = Field(default=15, ge=5, le=100, description="Minimum title length to process")
@@ -59,6 +71,37 @@ class ScrapingSettings(BaseSettings):
 
     class Config:
         env_prefix = "SCRAPING_"
+        case_sensitive = False
+
+
+class OpenAISettings(BaseSettings):
+    """OpenAI API configuration for AI-powered features"""
+
+    # API Configuration
+    api_key: Optional[SecretStr] = Field(default=None, description="OpenAI API key")
+    base_url: str = Field(default="https://api.openai.com/v1", description="OpenAI API base URL")
+
+    # Model Configuration
+    model: str = Field(default="gpt-4o-mini", description="OpenAI model to use")
+    embedding_model: str = Field(default="text-embedding-3-small", description="Model for embeddings")
+
+    # Feature Flags
+    enable_keyword_generation: bool = Field(default=True, description="Enable AI-powered keyword generation")
+    enable_content_classification: bool = Field(default=True, description="Enable AI-powered content classification")
+    enable_relevance_scoring: bool = Field(default=False, description="Enable AI-powered relevance scoring")
+
+    # Rate Limiting
+    requests_per_minute: int = Field(default=50, ge=1, le=200, description="Maximum requests per minute")
+    max_tokens_per_request: int = Field(default=1000, ge=100, le=4000, description="Maximum tokens per request")
+
+    # Caching
+    cache_ttl: int = Field(default=3600, ge=300, le=86400, description="TTL for AI response cache")
+
+    # Fallback Settings
+    fallback_to_regex: bool = Field(default=True, description="Fallback to regex classification if AI fails")
+
+    class Config:
+        env_prefix = "OPENAI_"
         case_sensitive = False
 
 
@@ -196,6 +239,7 @@ class Settings(BaseSettings):
 
     # Sub-settings
     scraping: ScrapingSettings = ScrapingSettings()
+    openai: OpenAISettings = OpenAISettings()
     database: DatabaseSettings = DatabaseSettings()
     alerts: AlertSettings = AlertSettings()
     cache: CacheSettings = CacheSettings()

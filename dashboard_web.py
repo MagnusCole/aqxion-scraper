@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import webbrowser
 import pytz
+from config_v2 import get_settings
 
 # Configuración de la página
 st.set_page_config(
@@ -15,6 +16,11 @@ st.set_page_config(
 # Función para conectar a la base de datos
 def get_db_connection():
     return sqlite3.connect('scraping.db')
+
+# Función para obtener la fecha UTC actual en formato ISO
+def get_utc_today():
+    """Obtiene la fecha UTC actual en formato ISO para consultas SQL"""
+    return datetime.now(pytz.UTC).strftime('%Y-%m-%d')
 
 # Función para convertir UTC a hora local de Lima
 def utc_to_lima_time(utc_str):
@@ -33,11 +39,12 @@ def get_today_data():
     cur = con.cursor()
 
     try:
-        # Usar zona horaria local para consistencia
+        # Usar UTC para consultas de base de datos
+        utc_today = get_utc_today()
         cur.execute("""
             SELECT * FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
-        """)
+            WHERE DATE(created_at) = ?
+        """, (utc_today,))
         today_posts = cur.fetchall()
         return today_posts
     except sqlite3.Error as e:
@@ -49,10 +56,14 @@ def get_today_data():
 # Función para obtener métricas de radar de mercado
 def get_market_radar_metrics():
     """Obtener métricas avanzadas para el radar de mercado"""
+    settings = get_settings()
     con = get_db_connection()
     cur = con.cursor()
 
     try:
+        # Usar UTC para consultas de base de datos
+        utc_today = get_utc_today()
+
         # Métricas de intención por hora
         cur.execute("""
             SELECT
@@ -64,10 +75,10 @@ def get_market_radar_metrics():
                     1
                 ) as intent_pct
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             GROUP BY hour
             ORDER BY hour
-        """)
+        """, (utc_today,))
         hourly_intent = cur.fetchall()
 
         # Top keywords con mayor crecimiento
@@ -78,13 +89,13 @@ def get_market_radar_metrics():
                 AVG(relevance_score) as avg_score,
                 SUM(CASE WHEN tag IN ('dolor', 'busqueda') THEN 1 ELSE 0 END) as hot_leads
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             AND keyword IS NOT NULL
             GROUP BY keyword
             HAVING posts_today >= 3
             ORDER BY hot_leads DESC, avg_score DESC
             LIMIT 10
-        """)
+        """, (utc_today,))
         top_keywords = cur.fetchall()
 
         # Distribución de tags
@@ -94,11 +105,11 @@ def get_market_radar_metrics():
                 COUNT(*) as count,
                 ROUND((COUNT(*) * 100.0) / SUM(COUNT(*)) OVER (), 1) as percentage
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             AND tag IS NOT NULL
             GROUP BY tag
             ORDER BY count DESC
-        """)
+        """, (utc_today,))
         tag_distribution = cur.fetchall()
 
         # Alertas de mercado (posts con alta intención)
@@ -111,12 +122,12 @@ def get_market_radar_metrics():
                 keyword,
                 created_at
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             AND tag IN ('dolor', 'busqueda')
-            AND relevance_score >= 80
+            AND relevance_score >= ?
             ORDER BY relevance_score DESC, created_at DESC
             LIMIT 5
-        """)
+        """, (utc_today, settings.scraping.min_relevance_score))
         market_alerts = cur.fetchall()
 
         return {
@@ -138,29 +149,32 @@ def get_kpis():
     cur = con.cursor()
     
     try:
+        # Usar UTC para consultas de base de datos
+        utc_today = get_utc_today()
+
         # Total posts
         cur.execute('SELECT COUNT(*) FROM posts')
         result = cur.fetchone()
         total_posts = result[0] if result else 0
 
-        # Posts por intención - usar zona horaria local
+        # Posts por intención - usar UTC para consultas
         cur.execute("""
             SELECT tag, COUNT(*) FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime') AND tag IS NOT NULL
+            WHERE DATE(created_at) = ? AND tag IS NOT NULL
             GROUP BY tag
-        """)
+        """, (utc_today,))
         intent_results = cur.fetchall()
         intent_counts = dict(intent_results) if intent_results else {}
 
-        # Top keywords por intención - usar zona horaria local
+        # Top keywords por intención - usar UTC para consultas
         cur.execute('''
             SELECT keyword, tag, COUNT(*) as count
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime') AND tag IS NOT NULL
+            WHERE DATE(created_at) = ? AND tag IS NOT NULL
             GROUP BY keyword, tag
             ORDER BY count DESC
             LIMIT 10
-        ''')
+        ''', (utc_today,))
         top_keywords = cur.fetchall()
         
         return total_posts, intent_counts, top_keywords or []
@@ -176,6 +190,9 @@ def get_keyword_kpis():
     cur = con.cursor()
     
     try:
+        # Usar UTC para consultas de base de datos
+        utc_today = get_utc_today()
+
         cur.execute("""
             SELECT 
                 keyword,
@@ -186,11 +203,11 @@ def get_keyword_kpis():
                     1
                 ) as intencion_pct
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             GROUP BY keyword
             ORDER BY intencion_pct DESC, total_posts DESC
             LIMIT 10
-        """)
+        """, (utc_today,))
         keyword_stats = cur.fetchall()
         return keyword_stats or []
     except sqlite3.Error as e:
@@ -205,13 +222,16 @@ def get_recent_posts(limit=10):
     cur = con.cursor()
     
     try:
+        # Usar UTC para consultas de base de datos
+        utc_today = get_utc_today()
+
         cur.execute('''
             SELECT keyword, title, url, tag, created_at, body
             FROM posts
-            WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+            WHERE DATE(created_at) = ?
             ORDER BY created_at DESC
             LIMIT ?
-        ''', (limit,))
+        ''', (utc_today, limit))
 
         posts = cur.fetchall()
         return posts or []
